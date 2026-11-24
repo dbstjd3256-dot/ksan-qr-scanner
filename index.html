@@ -91,6 +91,7 @@
 <div id="toast" class="hidden"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+<script>/* 예비: 첫 번째 서버가 안 되면 다른 서버에서 QR 읽기 프로그램을 받음 */ if (!window.jsQR) document.write('<script src="https://unpkg.com/jsqr@1.4.0/dist/jsQR.js"><\/script>');</script>
 <script>
 (function () {
   'use strict';
@@ -127,8 +128,11 @@
   function call(params) {
     var url = state.api + '?k=' + encodeURIComponent(state.key);
     Object.keys(params).forEach(function (k) { url += '&' + k + '=' + encodeURIComponent(params[k]); });
-    return fetch(url, { method: 'GET', redirect: 'follow', cache: 'no-store' })
-      .then(function (r) { return r.json(); })
+    // 20초 안에 답이 없으면 끊고 다시 시도 (인터넷이 느릴 때 멈춰 있지 않도록)
+    var ctrl = window.AbortController ? new AbortController() : null;
+    var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, 20000) : null;
+    return fetch(url, { method: 'GET', redirect: 'follow', cache: 'no-store', signal: ctrl ? ctrl.signal : undefined })
+      .then(function (r) { clearTimeout(timer); return r.json(); }, function (e) { clearTimeout(timer); throw e; })
       .then(function (j) { setNet(true); return j; }, function (e) { setNet(false); throw e; });
   }
 
@@ -164,16 +168,28 @@
     };
   }
 
+  // 날짜가 지나 숨겨진 행사도 볼 수 있게 (행사 날짜를 잘못 넣었을 때 대비)
+  function addOldButton(n) {
+    if (!n) return;
+    var b = document.createElement('button');
+    b.className = 'small'; b.style.width = '100%'; b.style.marginTop = '8px';
+    b.textContent = '지난 행사도 보기 (' + n + '개)';
+    b.onclick = function () { pickEvent.showOld = true; pickEvent(); };
+    $('evList').appendChild(b);
+  }
+
   function pickEvent() {
     sheet('<h2>📋 행사 고르기</h2><div id="evList" class="muted">불러오는 중…</div>');
     call({ api: 'events' }).then(function (r) {
       if (!r.ok) return needLink(r.message);
       // 날짜가 이틀 이상 지난 행사는 자동으로 숨기고, 최근에 등록한 행사가 맨 위
       var d = new Date(Date.now() - 86400000), y = d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
-      r.events = r.events.filter(function (e) { return !/^\d{4}-\d{2}-\d{2}$/.test(e.date) || e.date >= y; }).reverse();
+      var all = r.events.slice().reverse();
+      r.events = all.filter(function (e) { return pickEvent.showOld || !/^\d{4}-\d{2}-\d{2}$/.test(e.date) || e.date >= y; });
+      var hiddenCount = all.length - r.events.length;
       if (!r.events.length) {
         $('evList').innerHTML = '<div class="card">지금 <b>입장 진행 중</b>인 행사가 없어요.<br>행사 관리 창에서 <b>▶ 입장 시작하기</b>를 먼저 눌러 주세요.<button id="evRe">다시 확인</button></div>';
-        $('evRe').onclick = pickEvent; return;
+        $('evRe').onclick = pickEvent; addOldButton(hiddenCount); return;
       }
       $('evList').innerHTML = '';
       r.events.forEach(function (e) {
@@ -182,6 +198,7 @@
         c.querySelector('button').onclick = function () { state.eventId = e.id; LS.set('event', e.id); closeSheet(); loadRoster(true); };
         $('evList').appendChild(c);
       });
+      addOldButton(hiddenCount);
     }).catch(function () { $('evList').innerHTML = '<div class="card">인터넷 연결을 확인해 주세요.<button id="evRe">다시 시도</button></div>'; $('evRe').onclick = pickEvent; });
   }
 
