@@ -1,0 +1,423 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1f2937">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="KSAN Scanner">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>KSAN QR Scanner</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+  :root { --ok:#16a34a; --bad:#dc2626; --warn:#f59e0b; --ink:#111827; --brand:#f58f23; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { margin:0; height:100%; background:#111827; color:#fff; font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic",sans-serif; }
+  button { font:inherit; border:0; border-radius:12px; padding:12px 16px; font-weight:700; cursor:pointer; }
+  .hidden { display:none !important; }
+  #top { position:fixed; top:0; left:0; right:0; padding:calc(env(safe-area-inset-top) + 10px) 14px 10px; background:rgba(17,24,39,.92); z-index:5; }
+  #top .row { display:flex; align-items:center; gap:8px; }
+  #evName { font-weight:800; font-size:16px; flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #stats { font-size:13px; opacity:.85; margin-top:2px; }
+  .pill { font-size:12px; padding:4px 8px; border-radius:999px; background:#374151; white-space:nowrap; }
+  .pill.on { background:#065f46; } .pill.off { background:#7f1d1d; }
+  .small { background:#374151; color:#fff; padding:8px 10px; font-size:13px; border-radius:10px; }
+  #camWrap { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; background:#000; }
+  video { width:100%; height:100%; object-fit:cover; }
+  #frame { position:fixed; left:50%; top:50%; width:66vmin; height:66vmin; transform:translate(-50%,-45%); border:4px solid rgba(255,255,255,.85); border-radius:24px; box-shadow:0 0 0 2000px rgba(0,0,0,.35); pointer-events:none; }
+  #hint { position:fixed; left:0; right:0; bottom:calc(env(safe-area-inset-bottom) + 86px); text-align:center; font-size:15px; opacity:.9; }
+  #bottom { position:fixed; left:0; right:0; bottom:0; padding:10px 14px calc(env(safe-area-inset-bottom) + 12px); display:flex; gap:8px; background:rgba(17,24,39,.92); }
+  #bottom button { flex:1; background:#374151; color:#fff; }
+  #result { position:fixed; inset:0; z-index:20; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:24px; }
+  #result.ok { background:var(--ok); } #result.bad { background:var(--bad); } #result.warn { background:var(--warn); color:#111; } #result.wait { background:#374151; }
+  #rIcon { font-size:84px; line-height:1; }
+  #rTitle { font-size:34px; font-weight:900; margin-top:10px; }
+  #rEvent { font-size:17px; margin-top:16px; opacity:.9; }
+  #rName { font-size:40px; font-weight:900; margin-top:6px; word-break:keep-all; }
+  #rTicket { font-family:ui-monospace,Menlo,monospace; font-size:18px; margin-top:6px; opacity:.95; }
+  #rPay { display:inline-block; margin-top:14px; font-size:18px; font-weight:800; padding:8px 14px; border-radius:999px; background:rgba(255,255,255,.25); }
+  #rMsg { font-size:16px; margin-top:12px; max-width:520px; }
+  #rBtns { display:flex; flex-direction:column; gap:10px; margin-top:22px; width:100%; max-width:420px; }
+  #rBtns button { font-size:18px; padding:16px; }
+  .bWhite { background:#fff; color:#111; } .bDark { background:rgba(0,0,0,.25); color:inherit; }
+  #rTap { position:absolute; bottom:calc(env(safe-area-inset-bottom) + 18px); font-size:14px; opacity:.8; }
+  .sheet { position:fixed; inset:0; z-index:30; background:#111827; overflow:auto; padding:calc(env(safe-area-inset-top) + 18px) 18px 30px; }
+  .sheet h2 { margin:6px 0 14px; }
+  .card { background:#1f2937; border-radius:14px; padding:14px; margin-bottom:10px; }
+  .card button { width:100%; margin-top:8px; background:var(--brand); color:#fff; }
+  input { width:100%; padding:14px; font-size:17px; border-radius:12px; border:0; margin:6px 0; }
+  .muted { opacity:.75; font-size:14px; }
+  .item { display:flex; align-items:center; gap:10px; background:#1f2937; border-radius:12px; padding:12px; margin-bottom:8px; }
+  .item .g { flex:1; } .item b { display:block; font-size:16px; }
+  .item button { background:var(--ok); color:#fff; padding:10px 12px; }
+  .item button.done { background:#4b5563; }
+  #toast { position:fixed; left:12px; right:12px; top:calc(env(safe-area-inset-top) + 78px); z-index:40; background:#b91c1c; color:#fff; padding:12px 14px; border-radius:12px; font-weight:700; }
+</style>
+</head>
+<body>
+
+<div id="camWrap"><video id="video" playsinline muted></video></div>
+<div id="frame"></div>
+<div id="hint">참가자 메일의 QR을 네모 안에 비춰 주세요</div>
+
+<div id="top">
+  <div class="row"><div id="evName">KSAN QR Scanner</div><span id="net" class="pill">…</span></div>
+  <div class="row"><div id="stats" style="flex:1"></div><span id="queue" class="pill hidden"></span></div>
+</div>
+
+<div id="bottom">
+  <button id="bSearch">🔎 이름으로 찾기</button>
+  <button id="bEvent">📋 행사 바꾸기</button>
+</div>
+
+<div id="result" class="hidden">
+  <div id="rIcon"></div>
+  <div id="rTitle"></div>
+  <div id="rEvent"></div>
+  <div id="rName"></div>
+  <div id="rTicket"></div>
+  <div id="rPay" class="hidden"></div>
+  <div id="rMsg"></div>
+  <div id="rBtns"></div>
+  <div id="rTap">화면을 누르면 다음 스캔</div>
+</div>
+
+<!-- 처음 설정 / 행사 선택 / 이름 찾기 -->
+<div id="sheet" class="sheet hidden"></div>
+<div id="toast" class="hidden"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  var LS = {
+    get: function (k, d) { try { var v = localStorage.getItem('ksan.' + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set: function (k, v) { try { localStorage.setItem('ksan.' + k, JSON.stringify(v)); } catch (e) {} }
+  };
+
+  /* ---------- 설정 (스캐너 링크의 #api=..&k=..) ---------- */
+  function readHash() {
+    var h = location.hash.replace(/^#/, '');
+    if (!h) return;
+    var q = {};
+    h.split('&').forEach(function (p) { var i = p.indexOf('='); if (i > 0) q[p.slice(0, i)] = decodeURIComponent(p.slice(i + 1)); });
+    if (q.api && q.k) { LS.set('api', q.api); LS.set('k', q.k); }
+  }
+  function parseLink(text) {
+    var i = String(text || '').indexOf('#');
+    if (i === -1) return false;
+    location.hash = text.slice(i); readHash();
+    return !!LS.get('api');
+  }
+  readHash();
+
+  var state = {
+    api: LS.get('api', ''), key: LS.get('k', ''), by: LS.get('by', ''),
+    eventId: LS.get('event', ''), event: null,
+    tickets: {}, list: [], others: {},
+    queue: LS.get('queue', []), online: navigator.onLine,
+    busy: false, lastText: '', lastAt: 0
+  };
+
+  function call(params) {
+    var url = state.api + '?k=' + encodeURIComponent(state.key);
+    Object.keys(params).forEach(function (k) { url += '&' + k + '=' + encodeURIComponent(params[k]); });
+    return fetch(url, { method: 'GET', redirect: 'follow', cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(function (j) { setNet(true); return j; }, function (e) { setNet(false); throw e; });
+  }
+
+  function setNet(on) {
+    state.online = on;
+    $('net').textContent = on ? '● 연결됨' : '● 오프라인';
+    $('net').className = 'pill ' + (on ? 'on' : 'off');
+  }
+
+  /* ---------- 화면: 시트 ---------- */
+  function sheet(html) { $('sheet').innerHTML = html; $('sheet').classList.remove('hidden'); }
+  function closeSheet() { $('sheet').classList.add('hidden'); $('sheet').innerHTML = ''; }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+
+  function needLink(msg) {
+    sheet('<h2>📷 KSAN QR Scanner</h2>' +
+      '<div class="card">' + (msg ? '<p>' + esc(msg) + '</p>' : '') +
+      '<p>구글 시트 <b>KSAN → 🎟 행사 관리 열기 → 행사 카드 → 📷 QR 스캐너 열기</b>에 나오는 QR을 휴대폰 카메라로 찍어서 열어 주세요.</p>' +
+      '<p class="muted">또는 받은 스캐너 링크를 아래에 붙여 넣으세요.</p>' +
+      '<input id="linkIn" placeholder="https://…#api=…&k=…"><button id="linkOk">시작하기</button></div>');
+    $('linkOk').onclick = function () {
+      if (parseLink($('linkIn').value.trim())) { state.api = LS.get('api'); state.key = LS.get('k'); start(); }
+      else alert('스캐너 링크가 아니에요. 행사 관리 창에서 링크를 다시 복사해 주세요.');
+    };
+  }
+
+  function askName(next) {
+    sheet('<h2>👋 안녕하세요</h2><div class="card"><p>입장 기록에 남길 <b>내 이름</b>을 적어 주세요. (한 번만)</p>' +
+      '<input id="byIn" placeholder="예: 김윤성" value="' + esc(state.by) + '"><button id="byOk">확인</button></div>');
+    $('byOk').onclick = function () {
+      var v = $('byIn').value.trim(); if (!v) return;
+      state.by = v; LS.set('by', v); closeSheet(); next();
+    };
+  }
+
+  function pickEvent() {
+    sheet('<h2>📋 행사 고르기</h2><div id="evList" class="muted">불러오는 중…</div>');
+    call({ api: 'events' }).then(function (r) {
+      if (!r.ok) return needLink(r.message);
+      if (!r.events.length) {
+        $('evList').innerHTML = '<div class="card">지금 <b>입장 진행 중</b>인 행사가 없어요.<br>행사 관리 창에서 <b>▶ 입장 시작하기</b>를 먼저 눌러 주세요.<button id="evRe">다시 확인</button></div>';
+        $('evRe').onclick = pickEvent; return;
+      }
+      $('evList').innerHTML = '';
+      r.events.forEach(function (e) {
+        var c = document.createElement('div'); c.className = 'card';
+        c.innerHTML = '<b>' + esc(e.name) + '</b><div class="muted">' + esc(e.date) + ' · ' + esc(e.id) + '</div><button>이 행사 스캔하기</button>';
+        c.querySelector('button').onclick = function () { state.eventId = e.id; LS.set('event', e.id); closeSheet(); loadRoster(true); };
+        $('evList').appendChild(c);
+      });
+    }).catch(function () { $('evList').innerHTML = '<div class="card">인터넷 연결을 확인해 주세요.<button id="evRe">다시 시도</button></div>'; $('evRe').onclick = pickEvent; });
+  }
+
+  /* ---------- 명단 ---------- */
+  function loadRoster(first) {
+    if (!state.eventId) return pickEvent();
+    return call({ api: 'roster', ev: state.eventId }).then(function (r) {
+      if (!r.ok) { if (r.error === 'AUTH') return needLink(r.message); if (first) return pickEvent(); return; }
+      if (r.event.status !== 'CHECK-IN' && first) { state.eventId = ''; return pickEvent(); }
+      var pend = {};
+      state.queue.forEach(function (q) { pend[q.t] = q; });
+      var map = {};
+      r.tickets.forEach(function (t) {
+        var old = state.tickets[t.t];
+        if (!t.c && (pend[t.t] || (old && old.c && old.local))) { t.c = old ? old.c : '방금'; t.local = true; }
+        if (pend[t.t] && pend[t.t].pay) t.p = true;
+        map[t.t] = t;
+      });
+      state.tickets = map; state.list = r.tickets; state.others = r.others || {}; state.event = r.event;
+      LS.set('roster_' + state.eventId, { tickets: r.tickets, others: state.others, event: r.event });
+      render();
+    }).catch(function () {
+      if (first) {
+        var cached = LS.get('roster_' + state.eventId, null);
+        if (cached) { state.event = cached.event; state.list = cached.tickets; state.others = cached.others; cached.tickets.forEach(function (t) { state.tickets[t.t] = t; }); render(); }
+      }
+    });
+  }
+
+  function render() {
+    if (!state.event) return;
+    $('evName').textContent = state.event.name;
+    var n = state.list.length, c = 0;
+    state.list.forEach(function (t) { if (state.tickets[t.t] && state.tickets[t.t].c) c++; });
+    $('stats').textContent = '입장 ' + c + ' / 신청 ' + n + (state.event.pay ? ' · 💶 결제 행사' : '');
+    var q = state.queue.length;
+    $('queue').textContent = '전송 대기 ' + q;
+    $('queue').classList.toggle('hidden', !q);
+  }
+
+  /* ---------- 체크인 기록 보내기 (뒤에서) ---------- */
+  var sending = false;
+  function pushQueue(item) { state.queue.push(item); LS.set('queue', state.queue); render(); flush(); }
+  function flush() {
+    if (sending || !state.queue.length) return;
+    sending = true;
+    var q = state.queue[0];
+    call({ api: 'checkin', ev: q.ev, t: q.t, by: state.by, pay: q.pay ? 1 : 0 }).then(function (r) {
+      state.queue.shift(); LS.set('queue', state.queue); sending = false; render();
+      if (r.ok && r.code === 'ALREADY' && !q.manualAlready) toast('⚠ ' + (r.name || '') + ' — 다른 기기에서 이미 입장 처리된 티켓이에요 (' + (r.checkedAt || '') + ')');
+      else if (r.ok && r.code === 'UNPAID') toast('⚠ ' + (r.name || '') + ' — 시트에서는 아직 결제 전이에요');
+      else if (r.ok && r.code !== 'SUCCESS' && r.code !== 'ALREADY') toast('⚠ ' + (r.title || r.code));
+      flush();
+    }).catch(function () { sending = false; setTimeout(flush, 4000); });
+  }
+  window.addEventListener('online', function () { setNet(true); flush(); });
+  window.addEventListener('offline', function () { setNet(false); });
+
+  var toastTimer;
+  function toast(msg) {
+    $('toast').textContent = msg; $('toast').classList.remove('hidden');
+    clearTimeout(toastTimer); toastTimer = setTimeout(function () { $('toast').classList.add('hidden'); }, 6000);
+  }
+
+  /* ---------- 소리·진동 ---------- */
+  var actx;
+  function beep(ok) {
+    try {
+      actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+      var o = actx.createOscillator(), g = actx.createGain();
+      o.type = 'sine'; o.frequency.value = ok ? 1320 : 220;
+      g.gain.value = 0.15; o.connect(g); g.connect(actx.destination);
+      o.start(); o.stop(actx.currentTime + (ok ? 0.12 : 0.35));
+    } catch (e) {}
+    if (navigator.vibrate) navigator.vibrate(ok ? 80 : [120, 80, 120]);
+  }
+
+  /* ---------- 결과 화면 ---------- */
+  var resultTimer;
+  function show(kind, o) {
+    clearTimeout(resultTimer);
+    var r = $('result');
+    r.className = kind;
+    $('rIcon').textContent = o.icon || '';
+    $('rTitle').textContent = o.title || '';
+    $('rEvent').textContent = state.event ? state.event.name : '';
+    $('rName').textContent = o.name || '';
+    $('rTicket').textContent = o.ticket || '';
+    $('rPay').classList.toggle('hidden', !o.pay);
+    $('rPay').textContent = o.pay || '';
+    $('rMsg').textContent = o.msg || '';
+    var bs = $('rBtns'); bs.innerHTML = '';
+    (o.buttons || []).forEach(function (b) {
+      var x = document.createElement('button'); x.className = b.cls || 'bWhite'; x.textContent = b.label;
+      x.onclick = function (ev) { ev.stopPropagation(); b.fn(); }; bs.appendChild(x);
+    });
+    $('rTap').classList.toggle('hidden', !!(o.buttons && o.buttons.length));
+    if (o.auto) resultTimer = setTimeout(hideResult, o.auto);
+  }
+  function hideResult() { clearTimeout(resultTimer); $('result').className = 'hidden'; state.busy = false; state.lastAt = Date.now(); }
+  $('result').onclick = function () { if (!$('rBtns').children.length) hideResult(); };
+
+  function payText(t) { return state.event && state.event.pay ? (t.p ? '💶 결제 완료' : '💶 결제 미확인') : ''; }
+
+  function admit(t, pay) {
+    t.c = new Date().toTimeString().slice(0, 5); t.local = true; if (pay) t.p = true;
+    pushQueue({ t: t.t, ev: state.eventId, pay: !!pay, at: Date.now() });
+    beep(true);
+    show('ok', { icon: '✅', title: '입장 확인', name: t.n, ticket: t.id, pay: payText(t), auto: 2500 });
+  }
+
+  function handle(text) {
+    if (state.busy) return;
+    var now = Date.now();
+    if (text === state.lastText && now - state.lastAt < 2500) return;
+    state.lastText = text; state.busy = true;
+    var s = String(text).trim();
+    var m = /[?&]t=([a-f0-9]{32})/i.exec(s);
+    var token = (m ? m[1] : s).toLowerCase();
+    if (!/^[a-f0-9]{32}$/.test(token)) {
+      beep(false);
+      return show('bad', { icon: '❌', title: 'KSAN 티켓이 아니에요', msg: '참가자 확인 메일에 있는 QR 코드를 보여 달라고 해 주세요.', auto: 3500 });
+    }
+    var t = state.tickets[token];
+    if (t) return judge(t);
+    if (state.others[token]) {
+      beep(false);
+      return show('bad', { icon: '⛔', title: '다른 행사 티켓', msg: '이 티켓은 「' + state.others[token] + '」 행사 티켓이에요.', auto: 4000 });
+    }
+    // 명단을 받은 뒤 새로 신청한 사람일 수 있음 → 서버에서 바로 확인
+    show('wait', { icon: '⏳', title: '확인 중…', msg: '새로 신청한 티켓인지 확인하고 있어요' });
+    call({ api: 'checkin', ev: state.eventId, t: token, by: state.by, pay: 0 }).then(function (r) {
+      loadRoster(false);
+      if (r.ok && r.code === 'SUCCESS') { beep(true); return show('ok', { icon: '✅', title: '입장 확인', name: r.name, ticket: r.ticketId, auto: 2500 }); }
+      if (r.ok && r.code === 'ALREADY') { beep(false); return show('bad', { icon: '⛔', title: '이미 입장한 티켓', name: r.name, ticket: r.ticketId, msg: r.message, auto: 4000 }); }
+      if (r.ok && r.code === 'UNPAID') { beep(false); return show('warn', { icon: '💶', title: '결제 미확인', name: r.name, ticket: r.ticketId, msg: '명단을 새로 받았어요. 한 번 더 스캔해 주세요.', auto: 4000 }); }
+      beep(false); show('bad', { icon: '❌', title: (r && r.title) || '유효하지 않은 티켓', name: r && r.name, msg: r && r.message, auto: 4000 });
+    }).catch(function () {
+      beep(false); show('bad', { icon: '📡', title: '확인할 수 없어요', msg: '명단에 없는 티켓이고 인터넷이 연결되지 않았어요. 연결 후 다시 스캔해 주세요.', auto: 4000 });
+    });
+  }
+
+  function judge(t) {
+    if (t.c) {
+      beep(false);
+      return show('bad', { icon: '⛔', title: '이미 입장한 티켓', name: t.n, ticket: t.id, pay: payText(t), msg: t.c + ' 에 입장 처리됨', auto: 4000 });
+    }
+    if (!t.p) {
+      beep(false);
+      return show('warn', {
+        icon: '💶', title: '결제 미확인', name: t.n, ticket: t.id, pay: '💶 결제 미확인',
+        msg: '송금 내역을 확인했거나 현장에서 결제를 받았다면 아래 버튼을 눌러 주세요.',
+        buttons: [
+          { label: '💶 현장 결제 받음 → 입장', cls: 'bWhite', fn: function () { admit(t, true); } },
+          { label: '입장시키지 않기', cls: 'bDark', fn: hideResult }
+        ]
+      });
+    }
+    admit(t, false);
+  }
+
+  /* ---------- 이름으로 찾기 ---------- */
+  $('bSearch').onclick = function () {
+    if (!state.event) return;
+    sheet('<h2>🔎 이름으로 찾기</h2><input id="sIn" placeholder="이름 또는 티켓 번호" autocomplete="off"><div id="sOut" class="muted">2글자 이상 입력하세요</div><button class="small" id="sClose" style="margin-top:12px;width:100%">닫기</button>');
+    $('sClose').onclick = closeSheet;
+    $('sIn').oninput = function () {
+      var q = this.value.trim().toLowerCase(), out = $('sOut');
+      if (q.length < 2) { out.innerHTML = '2글자 이상 입력하세요'; return; }
+      var hits = state.list.filter(function (t) { return (t.n + ' ' + t.id).toLowerCase().indexOf(q) !== -1; }).slice(0, 30);
+      out.innerHTML = hits.length ? '' : '찾는 사람이 없어요';
+      hits.forEach(function (x) {
+        var t = state.tickets[x.t] || x;
+        var d = document.createElement('div'); d.className = 'item';
+        d.innerHTML = '<div class="g"><b>' + esc(t.n) + '</b><span class="muted">' + esc(t.id) + ' ' + esc(payText(t)) + '</span></div>';
+        var b = document.createElement('button');
+        if (t.c) { b.textContent = t.c + ' 입장'; b.className = 'done'; }
+        else { b.textContent = '입장 처리'; b.onclick = function () { closeSheet(); state.busy = true; judge(t); }; }
+        d.appendChild(b); out.appendChild(d);
+      });
+    };
+    $('sIn').focus();
+  };
+  $('bEvent').onclick = function () { pickEvent(); };
+
+  /* ---------- 카메라 + QR 읽기 ---------- */
+  var video = $('video'), canvas = document.createElement('canvas'), ctx = canvas.getContext('2d', { willReadFrequently: true });
+  var detector = null;
+  if ('BarcodeDetector' in window) {
+    try { BarcodeDetector.getSupportedFormats().then(function (f) { if (f.indexOf('qr_code') !== -1) detector = new BarcodeDetector({ formats: ['qr_code'] }); }); } catch (e) {}
+  }
+
+  function startCamera() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      $('hint').textContent = '이 브라우저에서는 카메라를 쓸 수 없어요. Safari나 Chrome으로 열어 주세요.'; return;
+    }
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false })
+      .then(function (stream) { video.srcObject = stream; video.play(); requestAnimationFrame(tick); })
+      .catch(function () { $('hint').textContent = '카메라 권한을 허용해 주세요. (설정 → Safari/Chrome → 카메라)'; });
+  }
+
+  var lastScan = 0, scanning = false;
+  function tick() {
+    requestAnimationFrame(tick);
+    var now = performance.now();
+    if (scanning || state.busy || !state.event || now - lastScan < 90 || video.readyState < 2) return;
+    lastScan = now;
+    var vw = video.videoWidth, vh = video.videoHeight;
+    var side = Math.min(vw, vh) * 0.8, sx = (vw - side) / 2, sy = (vh - side) / 2;
+    var size = 480;
+    canvas.width = size; canvas.height = size;
+    ctx.drawImage(video, sx, sy, side, side, 0, 0, size, size);
+    if (detector) {
+      scanning = true;
+      detector.detect(canvas).then(function (codes) { scanning = false; if (codes.length) handle(codes[0].rawValue); })
+        .catch(function () { scanning = false; detector = null; });
+      return;
+    }
+    if (!window.jsQR) return;
+    var img = ctx.getImageData(0, 0, size, size);
+    var code = window.jsQR(img.data, size, size, { inversionAttempts: 'dontInvert' });
+    if (code && code.data) handle(code.data);
+  }
+
+  /* ---------- 시작 ---------- */
+  function start() {
+    if (!state.api || !state.key) return needLink();
+    if (!state.by) return askName(start);
+    closeSheet();
+    setNet(navigator.onLine);
+    if (state.eventId) loadRoster(true); else pickEvent();
+    flush();
+    if (!state.timer) state.timer = setInterval(function () { if (!state.busy) loadRoster(false); }, 15000);
+  }
+
+  startCamera();
+  start();
+
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(function () {});
+})();
+</script>
+</body>
+</html>
